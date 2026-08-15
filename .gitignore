@@ -1,0 +1,7 @@
+*.jpeg
+*.jpg
+dataset
+output
+__pycache__
+
+TBAS

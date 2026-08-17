@@ -24,8 +24,12 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
-    QGridLayout
+    QGridLayout,
+    QComboBox
 )
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.figure import Figure
 
 from core.models import ImageData, ROI, Zone
 from core.ui.image_canvas import ImageCanvas
@@ -34,107 +38,159 @@ from core.zone_snapper import snap_zone_polygon
 
 class SnappingDebugDialog(QDialog):
     """
-    A modal dialog displaying the intermediate images of the refinement snapping algorithm
-    (Original Crop, Hessian ridges, search corridors, and Hough lines).
-    The images are fully zoomable (mouse wheel) and pannable (middle-click/drag).
+    A resizable modal dialog displaying the gradient-profile edge refinement debugging plots.
+    Reconstructs the 5 experimental views for any of the 4 edges of the scoring zone.
     """
     def __init__(self, debug_data: dict, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Refinement Snapping Debugger")
-        self.resize(950, 950)
+        self.resize(1100, 850)
+        
+        self.debug_data = debug_data
         
         layout = QVBoxLayout(self)
         
-        info = QLabel(
-            "<b>Snapping Evidence Visualizer</b> — showing what the Computer Vision algorithm detects inside the edge corridors.<br>"
-            "<i>Tip: Use mouse wheel to zoom, middle-mouse drag to pan.</i>"
-        )
-        layout.addWidget(info)
+        # Edge selector layout
+        sel_layout = QHBoxLayout()
+        sel_layout.addWidget(QLabel("<b>Select Edge to Inspect:</b>"))
+        self.edge_combo = QComboBox(self)
+        self.edge_combo.addItems([
+            "Edge 1 (P1 -> P2)",
+            "Edge 2 (P2 -> P3)",
+            "Edge 3 (P3 -> P4)",
+            "Edge 4 (P4 -> P1)"
+        ])
+        self.edge_combo.currentIndexChanged.connect(self.update_plots)
+        sel_layout.addWidget(self.edge_combo)
+        sel_layout.addStretch()
+        layout.addLayout(sel_layout)
         
-        # Grid layout for zoomable canvases
-        grid = QGridLayout()
+        # Embed Matplotlib Figure & Canvas
+        self.figure = Figure(figsize=(15, 9), dpi=100)
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        layout.addWidget(self.canvas)
         
-        # 1. Original ROI BGR image
-        crop_bgr = debug_data.get("cropped_image")
-        if crop_bgr is not None:
-            canvas = ImageCanvas(self)
-            canvas.set_image(crop_bgr)
-            canvas.setMinimumSize(350, 350)
-            h, w = crop_bgr.shape[:2]
-            canvas.zoom_to_rect(QRectF(0, 0, w, h))
-            
-            grid.addWidget(QLabel("<b>1. Original Crop</b>"), 0, 0, Qt.AlignmentFlag.AlignCenter)
-            grid.addWidget(canvas, 1, 0)
-             
-        # 2. Hessian ridges (global)
-        ridges = debug_data.get("ridges")
-        if ridges is not None:
-            ridges_bgr = cv2.cvtColor(ridges, cv2.COLOR_GRAY2BGR)
-            canvas = ImageCanvas(self)
-            canvas.set_image(ridges_bgr)
-            canvas.setMinimumSize(350, 350)
-            h, w = ridges.shape[:2]
-            canvas.zoom_to_rect(QRectF(0, 0, w, h))
-            
-            grid.addWidget(QLabel("<b>2. Hessian Ridges (Global)</b>"), 0, 1, Qt.AlignmentFlag.AlignCenter)
-            grid.addWidget(canvas, 1, 1)
-             
-        # 3. Combined Edge Corridors Mask (We can draw a combined mask of all corridors)
-        corridors = debug_data.get("corridors", [])
-        if corridors and ridges is not None:
-            combined_mask = np.zeros_like(ridges)
-            for m in corridors:
-                combined_mask = cv2.bitwise_or(combined_mask, m)
-            mask_bgr = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
-            canvas = ImageCanvas(self)
-            canvas.set_image(mask_bgr)
-            canvas.setMinimumSize(350, 350)
-            h, w = combined_mask.shape[:2]
-            canvas.zoom_to_rect(QRectF(0, 0, w, h))
-            
-            grid.addWidget(QLabel("<b>3. Combined Edge Corridors Mask</b>"), 2, 0, Qt.AlignmentFlag.AlignCenter)
-            grid.addWidget(canvas, 3, 0)
-             
-        # 4. Hough Line Candidates on top of ridges
-        if ridges is not None:
-            hough_img = cv2.cvtColor(ridges, cv2.COLOR_GRAY2BGR)
-            # Draw all detected Hough lines in blue
-            detected_lists = debug_data.get("detected_lines", [])
-            for line_list in detected_lists:
-                for x1, y1, x2, y2 in line_list:
-                    cv2.line(hough_img, (x1, y1), (x2, y2), (255, 0, 0), 1) # Blue lines for raw candidates
-             
-            # Draw human-drawn original polygon edges in Red
-            orig_poly = debug_data.get("original_polygon")
-            if orig_poly is not None:
-                pts = orig_poly.reshape(-1, 2)
-                for idx in range(len(pts)):
-                    p1 = pts[idx]
-                    p2 = pts[(idx + 1) % len(pts)]
-                    cv2.line(hough_img, (int(round(p1[0])), int(round(p1[1]))), (int(round(p2[0])), int(round(p2[1]))), (0, 0, 255), 2)
-
-            # Draw winning lines in thick Green
-            selected_lines = debug_data.get("selected_lines", [])
-            for pts in selected_lines:
-                if pts is not None:
-                    x1, y1, x2, y2 = pts
-                    cv2.line(hough_img, (x1, y1), (x2, y2), (0, 255, 0), 3) # Green line for winner
-                     
-            canvas = ImageCanvas(self)
-            canvas.set_image(hough_img)
-            canvas.setMinimumSize(350, 350)
-            h, w = hough_img.shape[:2]
-            canvas.zoom_to_rect(QRectF(0, 0, w, h))
-            
-            grid.addWidget(QLabel("<b>4. Edge Matching (Red: User | Blue: Hough | Green: Winner)</b>"), 2, 1, Qt.AlignmentFlag.AlignCenter)
-            grid.addWidget(canvas, 3, 1)
-             
-        layout.addLayout(grid)
-         
-        # Close button
+        # Add Matplotlib interactive toolbar
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        layout.addWidget(self.toolbar)
+        
+        # Close button at the bottom
+        btn_layout = QHBoxLayout()
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+        
+        # Draw initial plots
+        self.update_plots()
+        
+    def update_plots(self) -> None:
+        edge_idx = self.edge_combo.currentIndex()
+        crop_rgb = self.debug_data.get("cropped_image")
+        edges_data = self.debug_data.get("edges_data", [])
+        pts = self.debug_data.get("pts")
+        search_margin = self.debug_data.get("search_margin", 15.0)
+        
+        if crop_rgb is None or len(edges_data) != 4 or pts is None:
+            return
+            
+        p1 = pts[edge_idx]
+        p2 = pts[(edge_idx + 1) % 4]
+        res = edges_data[edge_idx]
+        
+        v_edge = p2.astype(np.float32) - p1.astype(np.float32)
+        length = np.linalg.norm(v_edge)
+        tangent = v_edge / (length + 1e-5)
+        normal = np.array([-tangent[1], tangent[0]], dtype=np.float32)
+        
+        self.figure.clear()
+        
+        # View 1 — Original ROI with overlays
+        ax1 = self.figure.add_subplot(2, 3, 1)
+        ax1.imshow(crop_rgb)
+        ax1.plot([p1[0], p2[0]], [p1[1], p2[1]], color="red", linewidth=1.2, label="Original Rough Edge")
+        p1_ref, p2_ref = res.refined_edge
+        ax1.plot([p1_ref[0], p2_ref[0]], [p1_ref[1], p2_ref[1]], color="lime", linewidth=1.2, label="Refined Edge")
+        ax1.set_title("View 1: Original Crop & Comparison")
+        ax1.legend()
+        
+        # View 2 — Gradient Magnitude (Scharr Filter)
+        crop = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        gx = cv2.Scharr(gray, cv2.CV_32F, 1, 0)
+        gy = cv2.Scharr(gray, cv2.CV_32F, 0, 1)
+        grad_mag = cv2.magnitude(gx, gy)
+        
+        ax2 = self.figure.add_subplot(2, 3, 2)
+        ax2.imshow(grad_mag, cmap="gray")
+        ax2.set_title("View 2: Grayscale Gradient Magnitude")
+        
+        # View 3 — Search Corridor Mask
+        mask = np.zeros(grad_mag.shape, dtype=np.uint8)
+        cv2.line(
+            mask,
+            (int(round(p1[0])), int(round(p1[1]))),
+            (int(round(p2[0])), int(round(p2[1]))),
+            255,
+            thickness=int(round(2 * search_margin))
+        )
+        ax3 = self.figure.add_subplot(2, 3, 3)
+        ax3.imshow(mask, cmap="gray")
+        ax3.set_title("View 3: Search Corridor Mask")
+        
+        # View 4 — Profile Samples & normal vectors
+        ax4 = self.figure.add_subplot(2, 3, 4)
+        ax4.imshow(crop_rgb)
+        ax4.plot([p1[0], p2[0]], [p1[1], p2[1]], color="red", alpha=0.5, linewidth=1.5)
+        num_samples = max(2, int(np.ceil(length / 5.0)))
+        sample_factors = np.linspace(0.0, 1.0, num_samples)
+        for t in sample_factors:
+            pt = p1 + t * v_edge
+            ax4.plot(pt[0], pt[1], "go", markersize=4)
+            cp1 = pt - normal * search_margin
+            cp2 = pt + normal * search_margin
+            ax4.plot([cp1[0], cp2[0]], [cp1[1], cp2[1]], color="cyan", alpha=0.6, linewidth=1.0)
+        ax4.set_title("View 4: Perpendicular Sampling Lines")
+        
+        # View 5 — Aggregated 1D Evidence Curve
+        ax5 = self.figure.add_subplot(2, 3, 5)
+        ax5.plot(res.offsets, res.aggregate_response, color="blue", linewidth=2.0)
+        ax5.axvline(0, color="red", linestyle="--", label="User Edge (0)")
+        ax5.axvline(res.offset_pixels, color="lime", linestyle="--", label=f"Refined Peak ({res.offset_pixels:+.1f} px)")
+        ax5.set_xlabel("Corridor Offset (px)")
+        ax5.set_ylabel("Gradient Sum")
+        ax5.set_title("View 5: 1D Aggregated Evidence")
+        ax5.legend()
+        ax5.grid(True)
+        
+        # View 6 — Metrics
+        ax6 = self.figure.add_subplot(2, 3, 6)
+        ax6.axis("off")
+        stats_text = (
+            f"EXPERIMENTAL METRICS:\n"
+            f"----------------------------------------\n"
+            f"Edge Length: {length:.1f} px\n"
+            f"Num Profiles: {num_samples}\n"
+            f"Search Margin: {search_margin} px\n"
+            f"Aggregation: Median\n\n"
+            f"Detected Offset: {res.offset_pixels:+.1f} px\n"
+            f"Peak Strength: {res.peak_strength:.1f}\n"
+            f"Confidence Ratio: {res.confidence:.3f}\n"
+            f"Localization Success: {res.success}\n"
+        )
+        ax6.text(
+            0.05, 0.85,
+            stats_text,
+            fontsize=10,
+            fontfamily="monospace",
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.5", fc="wheat", alpha=0.3)
+        )
+        ax6.set_title("Edge Localization Statistics")
+        
+        self.figure.tight_layout()
+        self.canvas.draw()
 
 
 class ZoneVertexHandle(QGraphicsEllipseItem):
@@ -1011,7 +1067,6 @@ class ZonePolygonEditor(QDialog):
             roi=self.roi,
             polygon=roi_local_poly,
             search_margin=search_margin,
-            hessian_threshold=250,
             return_debug=False
         )
         
@@ -1024,6 +1079,7 @@ class ZonePolygonEditor(QDialog):
         self.recreate_handles()
         self.redraw_active_lines()
         self._update_status()
+        self._update_undo_redo_buttons()
         
         print("Snapping complete.")
 
@@ -1048,7 +1104,6 @@ class ZonePolygonEditor(QDialog):
             roi=self.roi,
             polygon=roi_local_poly,
             search_margin=search_margin,
-            hessian_threshold=250,
             return_debug=True
         )
         

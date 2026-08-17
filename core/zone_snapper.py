@@ -1,264 +1,258 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import cv2
 import numpy as np
-
 from core.models import ImageData, ROI
-from core.hessian_detector import detect_hessian_ridges
 
 
-def line_from_points(p1: tuple[float, float], p2: tuple[float, float]) -> tuple[float, float, float]:
-    """
-    Returns the line equation coefficients (a, b, c) for ax + by + c = 0
-    passing through p1 and p2.
-    """
-    x1, y1 = p1
-    x2, y2 = p2
-    a = y2 - y1
-    b = x1 - x2
-    c = x2 * y1 - x1 * y2
-    return a, b, c
+@dataclass
+class EdgeLocalizationResult:
+    success: bool
+    original_edge: tuple[tuple[float, float], tuple[float, float]]
+    refined_edge: tuple[tuple[float, float], tuple[float, float]]
+    offset_pixels: float
+    peak_strength: float
+    confidence: float
+    offsets: np.ndarray
+    aggregate_response: np.ndarray
+    profile_responses: np.ndarray
 
 
-def intersect_lines(
-    line1: tuple[float, float, float],
-    line2: tuple[float, float, float],
-    fallback_pt: tuple[float, float]
-) -> tuple[float, float]:
+def localize_edge(
+    image_data: ImageData,
+    roi: ROI,
+    p1: np.ndarray,  # (2,) ROI-local coordinates
+    p2: np.ndarray,  # (2,) ROI-local coordinates
+    search_margin: float = 15.0,
+    sample_spacing: float = 5.0,
+    aggregation_method: str = "median",
+) -> EdgeLocalizationResult:
     """
-    Finds the intersection point of two lines:
-    a1*x + b1*y + c1 = 0
-    a2*x + b2*y + c2 = 0
-    If parallel, returns fallback_pt.
+    Local edge refinement using perpendicular gradient intensity profiles.
+    Calculates gradient magnitudes and aggregates them along the edge normals.
     """
-    a1, b1, c1 = line1
-    a2, b2, c2 = line2
+    crop = roi.crop(image_data.image)
+    if crop.size == 0:
+        return EdgeLocalizationResult(
+            success=False,
+            original_edge=((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1]))),
+            refined_edge=((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1]))),
+            offset_pixels=0.0,
+            peak_strength=0.0,
+            confidence=0.0,
+            offsets=np.array([]),
+            aggregate_response=np.array([]),
+            profile_responses=np.array([]),
+        )
+
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+    # Compute unsigned gradient magnitude using Scharr filter
+    gx = cv2.Scharr(gray, cv2.CV_32F, 1, 0)
+    gy = cv2.Scharr(gray, cv2.CV_32F, 0, 1)
+    grad_mag = cv2.magnitude(gx, gy)
+
+    v_edge = p2.astype(np.float32) - p1.astype(np.float32)
+    length = np.linalg.norm(v_edge)
     
-    det = a1 * b2 - a2 * b1
-    if abs(det) < 1e-5:
-        return fallback_pt
-        
-    x = (b1 * c2 - b2 * c1) / det
-    y = (c1 * a2 - c2 * a1) / det
-    return x, y
+    if length == 0:
+        return EdgeLocalizationResult(
+            success=False,
+            original_edge=((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1]))),
+            refined_edge=((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1]))),
+            offset_pixels=0.0,
+            peak_strength=0.0,
+            confidence=0.0,
+            offsets=np.array([]),
+            aggregate_response=np.array([]),
+            profile_responses=np.array([]),
+        )
 
+    tangent = v_edge / length
+    normal = np.array([-tangent[1], tangent[0]], dtype=np.float32)
 
-def point_line_distance(pt: tuple[float, float], line_pts: tuple[tuple[float, float], tuple[float, float]]) -> float:
-    """
-    Computes the perpendicular distance from pt to the infinite line passing through line_pts.
-    """
-    x0, y0 = pt
-    (x1, y1), (x2, y2) = line_pts
-    
-    denom = np.sqrt((y2 - y1)**2 + (x2 - x1)**2)
-    if denom == 0:
-        return np.sqrt((x0 - x1)**2 + (y0 - y1)**2)
-        
-    num = abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1)
-    return num / denom
+    # Generate profile sample coordinates along the edge
+    num_samples = max(2, int(np.ceil(length / sample_spacing)))
+    sample_factors = np.linspace(0.0, 1.0, num_samples)
+
+    # Define range of search offsets
+    margin_int = int(round(search_margin))
+    offsets = np.arange(-margin_int, margin_int + 1, dtype=np.int32)
+
+    # Extract perpendicular gradient profile for each sample point
+    profile_responses_list = []
+    for t in sample_factors:
+        pt = p1 + t * v_edge
+        profile = []
+        for offset in offsets:
+            pos = pt + normal * offset
+            cx = max(0.0, min(float(grad_mag.shape[1] - 1), float(pos[0])))
+            cy = max(0.0, min(float(grad_mag.shape[0] - 1), float(pos[1])))
+            val = cv2.getRectSubPix(grad_mag, (1, 1), (cx, cy))[0, 0]
+            profile.append(val)
+        profile_responses_list.append(profile)
+
+    profile_responses = np.array(profile_responses_list, dtype=np.float32)
+
+    # Aggregate profile evidence along the edge
+    if aggregation_method == "mean":
+        aggregate_response = np.mean(profile_responses, axis=0)
+    elif aggregation_method == "trimmed_mean":
+        sorted_profiles = np.sort(profile_responses, axis=0)
+        trim = max(1, int(num_samples * 0.1))
+        if num_samples > 2 * trim:
+            aggregate_response = np.mean(sorted_profiles[trim:-trim], axis=0)
+        else:
+            aggregate_response = np.median(profile_responses, axis=0)
+    else:  # 'median'
+        aggregate_response = np.median(profile_responses, axis=0)
+
+    # Evaluate peak strength and confidence metrics
+    peak_idx = np.argmax(aggregate_response)
+    peak_strength = float(aggregate_response[peak_idx])
+    offset_pixels = float(offsets[peak_idx])
+
+    # Find local maxima to calculate prominence/confidence ratio
+    local_maxima = []
+    for idx in range(1, len(aggregate_response) - 1):
+        if aggregate_response[idx] > aggregate_response[idx - 1] and aggregate_response[idx] > aggregate_response[idx + 1]:
+            local_maxima.append(idx)
+            
+    if len(aggregate_response) > 1:
+        if aggregate_response[0] > aggregate_response[1]:
+            local_maxima.append(0)
+        if aggregate_response[-1] > aggregate_response[-2]:
+            local_maxima.append(len(aggregate_response) - 1)
+
+    second_best_val = 0.0
+    for idx in local_maxima:
+        if idx != peak_idx:
+            second_best_val = max(second_best_val, float(aggregate_response[idx]))
+
+    if second_best_val == 0.0:
+        background_strength = float(np.mean(aggregate_response))
+    else:
+        background_strength = second_best_val
+
+    confidence = peak_strength / (background_strength + 1e-5)
+    success = confidence > 1.15 and peak_strength > 10.0
+
+    p1_refined = p1 + normal * offset_pixels
+    p2_refined = p2 + normal * offset_pixels
+
+    return EdgeLocalizationResult(
+        success=success,
+        original_edge=((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1]))),
+        refined_edge=((float(p1_refined[0]), float(p1_refined[1])), (float(p2_refined[0]), float(p2_refined[1]))),
+        offset_pixels=offset_pixels,
+        peak_strength=peak_strength,
+        confidence=confidence,
+        offsets=offsets,
+        aggregate_response=aggregate_response,
+        profile_responses=profile_responses,
+    )
 
 
 def snap_zone_polygon(
     image_data: ImageData,
     roi: ROI,
-    polygon: np.ndarray,
+    polygon: np.ndarray,  # (4, 1, 2) or (4, 2) ROI-local
     search_margin: float = 15.0,
-    hessian_threshold: int = 250,
+    sample_spacing: float = 5.0,
+    aggregation_method: str = "median",
     return_debug: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, dict]:
     """
-    Refines a user's rough polygon by searching for nearby printed boundaries
-    using Hessian ridges and Hough transforms, then intersecting the refined edges.
-
+    Production scoring zone snapping using local perpendicular gradient-profile edge refinement.
+    Reconstructs corners by intersecting adjacent refined boundary lines.
+    
     Parameters
-    -------
+    ----------
     image_data : ImageData
         Source image data.
     roi : ROI
-        The Region of Interest within which the coordinates are defined.
+        Region of interest bounding box.
     polygon : np.ndarray
-        Array of shape (N, 1, 2) or (N, 2) representing the ROI-local polygon vertices.
+        Rough polygon boundary contour (4 vertices) in ROI-local coordinates.
     search_margin : float
-        Width of the search band around each edge (in pixels).
-    hessian_threshold : int
-        Threshold for Hessian ridge detection.
+        Corridor margin (pixels).
+    sample_spacing : float
+        Sample profile line spacing (pixels).
+    aggregation_method : str
+        Aggregation mode ('median', 'mean', 'trimmed_mean').
     return_debug : bool
-        If True, return a tuple of (snapped_polygon, debug_data_dict) instead of just the polygon.
-
+        If True, returns a tuple of (snapped_polygon, debug_data_dict) for visualizer UI.
+        
     Returns
     -------
     np.ndarray or tuple[np.ndarray, dict]
-        The snapped/refined polygon contour (ROI-local coordinates) as shape (N, 1, 2).
-        If return_debug is True, returns (snapped_polygon, debug_data_dict).
+        Reconstructed snapped/refined polygon (4, 1, 2) in ROI-local coordinates.
     """
-    # Parse inputs
-    pts = polygon.reshape(-1, 2).astype(np.float32)
-    N = len(pts)
-    if N < 3:
+    pts = polygon.reshape(-1, 2)
+    if len(pts) != 4:
+        # Fallback for non-quad polygons
         if return_debug:
             return polygon.copy(), {}
         return polygon.copy()
 
-    # 1. Run Hessian Ridge detection inside ROI
-    try:
-        ridges = detect_hessian_ridges(image_data, roi, threshold=hessian_threshold)
-    except Exception as e:
-        print(f"Warning: Hessian ridge detection failed: {e}. Snapping will fallback to original coordinates.")
-        if return_debug:
-            try:
-                cropped = roi.crop(image_data.image)
-            except Exception:
-                cropped = None
-            fallback_debug = {
-                "cropped_image": cropped,
-                "ridges": None,
-                "corridors": [],
-                "corridor_ridges": [],
-                "detected_lines": [],
-                "selected_lines": [],
-                "original_polygon": polygon.copy(),
-            }
-            return polygon.copy(), fallback_debug
-        return polygon.copy()
-
-    # Initialize debug data if requested
-    cropped = roi.crop(image_data.image)
-    debug_data = {
-        "cropped_image": cropped,
-        "ridges": ridges,
-        "corridors": [],
-        "corridor_ridges": [],
-        "detected_lines": [],
-        "selected_lines": [],
-        "original_polygon": polygon.copy(),
-    }
-
-    # 2. Refine each edge independently
-    refined_lines: list[tuple[float, float, float]] = []
-
-    for i in range(N):
+    # Localize each of the 4 edges and compute line equations: A x + B y + C = 0
+    line_eqs = []
+    edges_results = []
+    
+    for i in range(4):
         p1 = pts[i]
-        p2 = pts[(i + 1) % N]
+        p2 = pts[(i + 1) % 4]
         
-        # Original edge representation
-        orig_line = line_from_points((p1[0], p1[1]), (p2[0], p2[1]))
-        
-        # Direction and length of the user's rough edge
-        v_user = p2 - p1
-        length = np.linalg.norm(v_user)
-        if length == 0:
-            refined_lines.append(orig_line)
-            if return_debug:
-                debug_data["corridors"].append(np.zeros_like(ridges))
-                debug_data["corridor_ridges"].append(np.zeros_like(ridges))
-                debug_data["detected_lines"].append([])
-                debug_data["selected_lines"].append(None)
-            continue
-            
-        # Draw a thick search corridor mask
-        mask = np.zeros(ridges.shape, dtype=np.uint8)
-        cv2.line(
-            mask,
-            (int(round(p1[0])), int(round(p1[1]))),
-            (int(round(p2[0])), int(round(p2[1]))),
-            255,
-            thickness=int(round(2 * search_margin))
+        # Run localizer on this edge
+        res = localize_edge(
+            image_data=image_data,
+            roi=roi,
+            p1=p1,
+            p2=p2,
+            search_margin=search_margin,
+            sample_spacing=sample_spacing,
+            aggregation_method=aggregation_method,
         )
+        edges_results.append(res)
         
-        # Extract ridges inside the corridor
-        corridor_ridges = cv2.bitwise_and(ridges, ridges, mask=mask)
+        # Line normal calculation from the refined points
+        p1_ref = np.array(res.refined_edge[0], dtype=np.float32)
+        p2_ref = np.array(res.refined_edge[1], dtype=np.float32)
         
-        # Detect candidate lines
-        min_line_len = max(5.0, length * 0.3)
-        lines = cv2.HoughLinesP(
-            corridor_ridges,
-            rho=1,
-            theta=np.pi / 180,
-            threshold=8,
-            minLineLength=int(round(min_line_len)),
-            maxLineGap=12
-        )
-        
-        if return_debug:
-            debug_data["corridors"].append(mask.copy())
-            debug_data["corridor_ridges"].append(corridor_ridges.copy())
-            if lines is not None:
-                lines_flat = []
-                for l in lines:
-                    pts_l = l.ravel().tolist()
-                    if len(pts_l) == 4:
-                        lines_flat.append(pts_l)
-                debug_data["detected_lines"].append(lines_flat)
-            else:
-                debug_data["detected_lines"].append([])
+        v_edge = p2_ref - p1_ref
+        A = -v_edge[1]
+        B = v_edge[0]
+        C = -(A * p1_ref[0] + B * p1_ref[1])
+        line_eqs.append((A, B, C))
 
-        if lines is None or len(lines) == 0:
-            # Fallback to original user line
-            refined_lines.append(orig_line)
-            if return_debug:
-                debug_data["selected_lines"].append(None)
-            continue
-            
-        # Evaluate and rank candidate lines
-        best_line_eq = orig_line
-        best_score = -float('inf')
-        best_line_pts = None
+    # Reconstruct the 4 corners by intersecting adjacent refined lines
+    new_pts = []
+    for i in range(4):
+        A1, B1, C1 = line_eqs[(i - 1) % 4]
+        A2, B2, C2 = line_eqs[i]
         
-        for line in lines:
-            pts_coords = line.ravel()
-            if len(pts_coords) != 4:
-                continue
-            x1, y1, x2, y2 = pts_coords
-            v_cand = np.array([x2 - x1, y2 - y1], dtype=np.float32)
-            cand_len = np.linalg.norm(v_cand)
-            if cand_len == 0:
-                continue
-                
-            # Compute distance penalty (average perp distance of user's endpoints to candidate line)
-            d1 = point_line_distance((p1[0], p1[1]), ((x1, y1), (x2, y2)))
-            d2 = point_line_distance((p2[0], p2[1]), ((x1, y1), (x2, y2)))
-            dist_penalty = (d1 + d2) / 2.0
-            
-            # Compute angular deviation
-            dot_prod = abs(np.dot(v_user, v_cand)) / (length * cand_len)
-            dot_prod = max(0.0, min(1.0, dot_prod)) # Clamp numerical noise
-            angle_rad = np.arccos(dot_prod)
-            angle_deg = np.degrees(angle_rad)
-            
-            # Apply hard thresholds to avoid snapping to wrong orientations or far away details
-            # Allow less than 3 degrees of angular change
-            if dist_penalty > search_margin or angle_deg > 3.0:
-                continue
-                
-            # Score formula: encourage longer lines with low distance/angle deviation
-            score = cand_len - (1.5 * dist_penalty) - (2.0 * angle_deg)
-            
-            if score > best_score:
-                best_score = score
-                best_line_eq = line_from_points((x1, y1), (x2, y2))
-                best_line_pts = (x1, y1, x2, y2)
-                
-        refined_lines.append(best_line_eq)
-        if return_debug:
-            debug_data["selected_lines"].append(best_line_pts)
+        det = A1 * B2 - A2 * B1
+        if abs(det) > 1e-5:
+            x = (-C1 * B2 + C2 * B1) / det
+            y = (-A1 * C2 + A2 * C1) / det
+            new_pts.append([int(round(x)), int(round(y))])
+        else:
+            # Fallback to original vertex if lines are parallel
+            new_pts.append([int(round(pts[i][0])), int(round(pts[i][1]))])
 
-    # 3. Intersect adjacent refined lines to reconstruct polygon corners
-    snapped_pts = []
-    for i in range(N):
-        prev_line = refined_lines[(i - 1 + N) % N]
-        curr_line = refined_lines[i]
-        
-        # Fallback is the original rough point coordinates
-        orig_pt = (pts[i][0], pts[i][1])
-        ix, iy = intersect_lines(prev_line, curr_line, orig_pt)
-        
-        # Clamp snapped coordinate to ROI dimensions
-        ix = max(0.0, min(ix, float(roi.width - 1)))
-        iy = max(0.0, min(iy, float(roi.height - 1)))
-        
-        snapped_pts.append([int(round(ix)), int(round(iy))])
+    snapped_polygon = np.array(new_pts, dtype=np.int32).reshape(4, 1, 2)
 
-    result_poly = np.array(snapped_pts, dtype=np.int32).reshape(-1, 1, 2)
     if return_debug:
-        return result_poly, debug_data
-    return result_poly
+        crop = roi.crop(image_data.image)
+        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        
+        debug_data = {
+            "cropped_image": crop_rgb,
+            "edges_data": edges_results,
+            "pts": pts.copy(),
+            "search_margin": search_margin,
+        }
+        return snapped_polygon, debug_data
+
+    return snapped_polygon

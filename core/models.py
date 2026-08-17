@@ -85,3 +85,59 @@ class PaperDetectionResult:
     area_pixels: float
     perimeter_pixels: float
     bounding_box: tuple[int, int, int, int]
+
+@dataclass(frozen=True)
+class ROI:
+    """
+    Region of interest expressed in original-image coordinates.
+
+    All coordinates refer to the original, full-resolution image.
+    """
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+    @property
+    def x2(self) -> int:
+        return self.x + self.width
+
+    @property
+    def y2(self) -> int:
+        return self.y + self.height
+
+    @property
+    def area(self) -> int:
+        return self.width * self.height
+
+    def crop(self, image: np.ndarray) -> np.ndarray:
+        """Return the ROI cropped from an image."""
+
+        return image[
+            self.y:self.y2,
+            self.x:self.x2,
+        ]
+
+    def to_tuple(self) -> tuple[int, int, int, int]:
+        """Return (x, y, width, height)."""
+
+        return (
+            self.x,
+            self.y,
+            self.width,
+            self.height,
+        )
+
+    def contains(
+        self,
+        x: int,
+        y: int,
+    ) -> bool:
+        """Check whether an image coordinate lies inside the ROI."""
+
+        return (
+            self.x <= x <= self.x2
+            and
+            self.y <= y <= self.y2
+        )

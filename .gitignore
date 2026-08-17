@@ -1,7 +1,11 @@
 *.jpeg
 *.jpg
+*.png
+
+docs
 dataset
 output
 __pycache__
+__pycache__/*
 
 TBAS

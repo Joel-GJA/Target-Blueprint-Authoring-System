@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
@@ -129,6 +131,39 @@ class ROI:
             self.height,
         )
 
+    def save(self, filepath: str | Path) -> None:
+        """Save the ROI properties to a JSON file."""
+        import json
+        data = {
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height
+        }
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=4)
+
+    @classmethod
+    def load(cls, filepath: str | Path) -> ROI | None:
+        """Load the ROI properties from a JSON file."""
+        import json
+        from pathlib import Path
+        p = Path(filepath)
+        if not p.exists():
+            return None
+        try:
+            with open(p, "r") as f:
+                data = json.load(f)
+            return cls(
+                x=data["x"],
+                y=data["y"],
+                width=data["width"],
+                height=data["height"]
+            )
+        except Exception as e:
+            print(f"Error loading ROI: {e}")
+            return None
+
     def contains(
         self,
         x: int,
@@ -141,3 +176,13 @@ class ROI:
             and
             self.y <= y <= self.y2
         )
+
+
+@dataclass
+class Zone:
+    """A scoring zone defined as a polygon with score and name metadata."""
+
+    zone_id: str
+    polygon: np.ndarray  # OpenCV contour shape (N, 1, 2), ROI-local coordinates
+    score: float
+    name: str = ""

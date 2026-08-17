@@ -19,7 +19,7 @@ from core.ui.candidate_selector import SilhouetteCandidateSelector
 from core.ui.contour_editor import ContourEditor
 
 # Default image path (can be overridden via command-line arguments)
-IMAGE_PATH = "test_images/target_preview_fig11_50mm_tags_with_cutt_out.png"
+IMAGE_PATH = "test_images/outdoor target.jpeg"
 
 
 def print_final_contour_info(contour: np.ndarray) -> None:
@@ -86,6 +86,10 @@ def main():
         return
 
     print(f"Selected ROI: x={roi.x}, y={roi.y}, w={roi.width}, h={roi.height}")
+    
+    # Save ROI to a file so it can be reused in zoning flow
+    roi.save("test_images/roi.json")
+    print("Saved ROI coordinates to test_images/roi.json")
 
     # ---------------------------------------------------------
     # 3. Run Automatic Silhouette Detection
@@ -144,6 +148,11 @@ def main():
     # 6. Save/Display final authorized result
     # ---------------------------------------------------------
     print_final_contour_info(final_contour)
+
+    # Save the final contour for use in the zoning flow
+    contour_path = Path("test_images/silhouette_contour.npy")
+    np.save(str(contour_path), final_contour)
+    print(f"Saved final silhouette contour to: {contour_path}")
 
     # Crop the ROI to display final result
     cropped_bgr = roi.crop(image_data.image)

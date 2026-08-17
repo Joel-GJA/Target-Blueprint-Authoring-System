@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
-from PySide6.QtGui import QColor, QPen, QPolygonF, QPainterPath
+from PySide6.QtGui import QColor, QPen, QPolygonF, QPainterPath, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -62,6 +62,8 @@ class VertexHandle(QGraphicsEllipseItem):
             self.parent_editor.delete_vertex(self.idx)
             event.accept()
         else:
+            # Save state before starting the drag
+            self.parent_editor.save_undo_state()
             super().mousePressEvent(event)
 
     def itemChange(self, change, value):
@@ -107,6 +109,10 @@ class ContourEditor(QDialog):
         # Mode state: "select", "add", "delete"
         self.mode = "select"
 
+        # Undo/Redo stacks
+        self.undo_stack: list[np.ndarray] = []
+        self.redo_stack: list[np.ndarray] = []
+
         # Item tracking
         self._handles: list[VertexHandle] = []
         self._line_item: QGraphicsPolygonItem | None = None
@@ -141,18 +147,26 @@ class ContourEditor(QDialog):
         self.select_btn = QPushButton("Select / Move")
         self.select_btn.setCheckable(True)
         self.select_btn.setChecked(True)
+        self.select_btn.setShortcut(QKeySequence("S"))
+        self.select_btn.setToolTip("Select and drag contour vertices (Shortcut: S)")
         self.select_btn.clicked.connect(lambda: self._set_mode("select"))
 
         self.add_btn = QPushButton("Add Point")
         self.add_btn.setCheckable(True)
+        self.add_btn.setShortcut(QKeySequence("A"))
+        self.add_btn.setToolTip("Insert a single vertex on click, then auto-select (Shortcut: A)")
         self.add_btn.clicked.connect(lambda: self._set_mode("add"))
 
         self.add_multiple_btn = QPushButton("Add Multiple Points")
         self.add_multiple_btn.setCheckable(True)
+        self.add_multiple_btn.setShortcut(QKeySequence("M"))
+        self.add_multiple_btn.setToolTip("Click to insert multiple vertices continuously (Shortcut: M)")
         self.add_multiple_btn.clicked.connect(lambda: self._set_mode("add_multiple"))
 
         self.delete_btn = QPushButton("Delete Point")
         self.delete_btn.setCheckable(True)
+        self.delete_btn.setShortcut(QKeySequence("D"))
+        self.delete_btn.setToolTip("Click a vertex to remove it (Shortcut: D)")
         self.delete_btn.clicked.connect(lambda: self._set_mode("delete"))
 
         # Make mode buttons exclusive
@@ -164,12 +178,34 @@ class ContourEditor(QDialog):
         self.mode_group.setExclusive(True)
 
         self.reset_btn = QPushButton("Reset Contour")
+        self.reset_btn.setShortcut(QKeySequence("R"))
+        self.reset_btn.setToolTip("Discard all changes and reset to initial automatic candidate (Shortcut: R)")
         self.reset_btn.clicked.connect(self.reset_contour)
+
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.setEnabled(False)
+        self.undo_btn.setToolTip("Undo the last action (Shortcut: Ctrl+Z)")
+        self.undo_btn.clicked.connect(self.undo)
+
+        self.redo_btn = QPushButton("Redo")
+        self.redo_btn.setEnabled(False)
+        self.redo_btn.setToolTip("Redo the undone action (Shortcut: Ctrl+Y)")
+        self.redo_btn.clicked.connect(self.redo)
+
+        # Setup standard keyboard shortcuts
+        self.undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self.undo_shortcut.activated.connect(self.undo)
+
+        self.redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        self.redo_shortcut.activated.connect(self.redo)
 
         toolbar_layout.addWidget(self.select_btn)
         toolbar_layout.addWidget(self.add_btn)
         toolbar_layout.addWidget(self.add_multiple_btn)
         toolbar_layout.addWidget(self.delete_btn)
+        toolbar_layout.addSpacing(20)
+        toolbar_layout.addWidget(self.undo_btn)
+        toolbar_layout.addWidget(self.redo_btn)
         toolbar_layout.addSpacing(20)
         toolbar_layout.addWidget(self.reset_btn)
         toolbar_layout.addStretch()
@@ -189,10 +225,14 @@ class ContourEditor(QDialog):
         bottom_layout.addWidget(self.status_label, stretch=1)
 
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setShortcut(QKeySequence("Escape"))
+        self.cancel_button.setToolTip("Discard all changes and exit (Shortcut: Esc)")
         self.cancel_button.clicked.connect(self.reject)
         
         self.confirm_button = QPushButton("Confirm")
         self.confirm_button.setDefault(True)
+        self.confirm_button.setShortcut(QKeySequence("Ctrl+Return"))
+        self.confirm_button.setToolTip("Save changes and confirm final contour (Shortcut: Ctrl+Enter)")
         self.confirm_button.clicked.connect(self.confirm_contour)
 
         bottom_layout.addWidget(self.cancel_button)
@@ -324,6 +364,9 @@ class ContourEditor(QDialog):
         if not (self.roi.x - 20 <= wx < self.roi.x2 + 20 and self.roi.y - 20 <= wy < self.roi.y2 + 20):
             return
 
+        # Save undo state before modifying
+        self.save_undo_state()
+
         pts = self.current_contour.reshape(-1, 2)
         best_idx, best_proj = self._find_nearest_segment_insertion(pts, (wx, wy))
 
@@ -348,6 +391,9 @@ class ContourEditor(QDialog):
         if len(pts) <= 3:
             QMessageBox.warning(self, "Invalid Action", "Contours must have at least 3 vertices.")
             return
+
+        # Save undo state before modifying
+        self.save_undo_state()
 
         pts = np.delete(pts, idx, axis=0)
         self.current_contour = pts.reshape(-1, 1, 2)
@@ -407,6 +453,8 @@ class ContourEditor(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            # Save undo state before resetting
+            self.save_undo_state()
             self.current_contour = self.initial_contour.copy()
             self.recreate_handles()
             self.redraw_contour_line()
@@ -445,6 +493,62 @@ class ContourEditor(QDialog):
         self.status_label.setText(
             f"<b>Mode:</b> {mode_str} | <b>Vertices:</b> {pt_count}{pos_str}"
         )
+
+    def save_undo_state(self) -> None:
+        """
+        Saves a copy of the current contour shape to the undo stack.
+        Clears the redo stack.
+        """
+        self.undo_stack.append(self.current_contour.copy())
+        self.redo_stack.clear()
+        
+        if len(self.undo_stack) > 5:
+            self.undo_stack.pop(0)
+            
+        self._update_undo_redo_buttons()
+
+    def undo(self) -> None:
+        """
+        Restores the previous state from the undo stack.
+        """
+        if not self.undo_stack:
+            return
+            
+        self.redo_stack.append(self.current_contour.copy())
+        if len(self.redo_stack) > 5:
+            self.redo_stack.pop(0)
+            
+        self.current_contour = self.undo_stack.pop()
+        
+        self.recreate_handles()
+        self.redraw_contour_line()
+        self._update_status()
+        self._update_undo_redo_buttons()
+
+    def redo(self) -> None:
+        """
+        Restores the state from the redo stack.
+        """
+        if not self.redo_stack:
+            return
+            
+        self.undo_stack.append(self.current_contour.copy())
+        if len(self.undo_stack) > 5:
+            self.undo_stack.pop(0)
+            
+        self.current_contour = self.redo_stack.pop()
+        
+        self.recreate_handles()
+        self.redraw_contour_line()
+        self._update_status()
+        self._update_undo_redo_buttons()
+
+    def _update_undo_redo_buttons(self) -> None:
+        """
+        Updates the enabled state of the Undo and Redo buttons.
+        """
+        self.undo_btn.setEnabled(len(self.undo_stack) > 0)
+        self.redo_btn.setEnabled(len(self.redo_stack) > 0)
 
     def confirm_contour(self) -> None:
         """

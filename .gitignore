@@ -1,6 +1,8 @@
 *.jpeg
 *.jpg
 *.png
+*.npy
+test_images/*
 
 docs
 dataset

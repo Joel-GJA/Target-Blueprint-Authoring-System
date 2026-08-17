@@ -39,6 +39,19 @@ def draw_candidates(image: np.ndarray, candidates) -> np.ndarray:
             color = (255, 192, 203)  # Others: Pink
 
         cv2.drawContours(output, [contour], -1, color, 2)
+
+        x, y, w, h = cv2.boundingRect(contour)
+        label = f"#{index + 1} ({candidate.score:.2f})"
+        cv2.putText(
+            output,
+            label,
+            (x, max(20, y - 5)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
     return output
 
 
@@ -147,6 +160,17 @@ def main():
     if white_contour is not None:
         # Draw in Blue (255, 0, 0)
         cv2.drawContours(white_contour_vis, [white_contour], -1, (255, 0, 0), 3)
+        x, y, w, h = cv2.boundingRect(white_contour)
+        cv2.putText(
+            white_contour_vis,
+            f"White Contour ({cv2.contourArea(white_contour):.1f} px2)",
+            (x, max(20, y - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 0, 0),
+            2,
+            cv2.LINE_AA,
+        )
     white_contour_vis_rgb = cv2.cvtColor(white_contour_vis, cv2.COLOR_BGR2RGB)
 
     # Image 3: Combined Visualization (Candidate #1 + White Mask Contour)

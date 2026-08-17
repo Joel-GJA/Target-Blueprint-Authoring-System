@@ -15,7 +15,7 @@ from core.silhouette_detector import (
 )
 
 
-IMAGE_PATH = "test_images/outdoor target.jpeg"
+IMAGE_PATH = "test_images/001-20260730170838506.png"
 
 
 def draw_candidates(

@@ -55,6 +55,7 @@ class SilhouetteDetectionResult:
     hessian_mask: np.ndarray
     inside_target_mask: np.ndarray
     white_mask: np.ndarray
+    white_mask_contour: np.ndarray | None = None
 
 
 class SilhouetteDetectionError(Exception):
@@ -575,6 +576,26 @@ def _score_candidate(
     )
 
 
+def _extract_white_mask_contour(
+    inner_target_candidate: np.ndarray,
+) -> np.ndarray | None:
+    """
+    Extract the largest contour representing the boundary of the inner target
+    from the inverted white mask (inner target candidate).
+    """
+    contours, _ = cv2.findContours(
+        inner_target_candidate,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+
+    if not contours:
+        return None
+
+    # Return the largest contour by area
+    return max(contours, key=cv2.contourArea)
+
+
 # ----------------------------------------------------------------------
 # Public API
 # ----------------------------------------------------------------------
@@ -682,9 +703,14 @@ def detect_silhouette_candidates(
         :max_candidates
     ]
 
+    white_mask_contour = _extract_white_mask_contour(
+        hsv_evidence.inner_target_candidate
+    )
+
     return SilhouetteDetectionResult(
         candidates=scored,
         hessian_mask=hessian_mask,
         inside_target_mask=target_mask,
         white_mask=hsv_evidence.white_mask,
+        white_mask_contour=white_mask_contour,
     )

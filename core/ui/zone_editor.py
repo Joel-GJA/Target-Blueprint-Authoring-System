@@ -752,6 +752,7 @@ class ZonePolygonEditor(QDialog):
         self.cancel_drawing()
         self._update_zone_list()
         self._select_zone(idx)
+        self.snap_active_zone()
 
     def delete_active_zone(self) -> None:
         if self.active_zone_index is None:

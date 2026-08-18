@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
 from PySide6.QtGui import QColor, QPen, QPolygonF, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -1378,6 +1378,29 @@ class FeatureRegionEditor(QDialog):
             )
         except Exception as e:
             QMessageBox.critical(self, "Error Loading Template", f"Failed to load or scale template: {e}")
+
+    def zoom_to_roi(self) -> None:
+        """
+        Zooms and pans the canvas to center on the target ROI with a comfortable margin.
+        """
+        img_w, img_h = self.image_data.image.shape[1], self.image_data.image.shape[0]
+        margin = max(self.roi.width, self.roi.height) * 0.15
+        zoom_rect = QRectF(
+            self.roi.x - margin,
+            self.roi.y - margin,
+            self.roi.width + 2 * margin,
+            self.roi.height + 2 * margin
+        )
+        zoom_rect = zoom_rect.intersected(QRectF(0, 0, img_w, img_h))
+        self.canvas.zoom_to_rect(zoom_rect)
+
+    def showEvent(self, event) -> None:
+        """
+        Delayed call to zoom_to_roi when the widget is shown to ensure viewport size is calculated.
+        """
+        super().showEvent(event)
+        QTimer.singleShot(50, self.zoom_to_roi)
+
 
 
 

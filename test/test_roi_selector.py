@@ -2,7 +2,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from core.image_loader import load_image
+from core.calibration.image_loader import load_image
 from core.roi import ROISelector
 
 

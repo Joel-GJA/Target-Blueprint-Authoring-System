@@ -33,7 +33,7 @@ from matplotlib.figure import Figure
 
 from core.models import ImageData, ROI, Zone
 from core.ui.image_canvas import ImageCanvas
-from core.zone_snapper import snap_zone_polygon
+from core.geometry.zone_snapper import snap_zone_polygon
 
 
 class SnappingDebugDialog(QDialog):

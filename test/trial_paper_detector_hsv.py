@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-from core.image_loader import load_image
+from core.calibration.image_loader import load_image
 
 image_data = load_image(
     "test_images/outdoor target.jpeg"

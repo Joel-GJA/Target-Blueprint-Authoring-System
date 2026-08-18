@@ -12,9 +12,9 @@ import numpy as np
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from core.image_loader import load_image
-from core.roi_selector import ROISelector
-from core.silhouette_detector import detect_silhouette_candidates
+from core.calibration.image_loader import load_image
+from core.roi.selector import ROISelector
+from core.detection.silhouette_detector import detect_silhouette_candidates
 from core.ui.candidate_selector import SilhouetteCandidateSelector
 from core.ui.contour_editor import ContourEditor
 

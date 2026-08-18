@@ -5,8 +5,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from core.hessian_detector import detect_hessian_ridges
-from core.hsv_detector import detect_hsv_evidence
+from core.detection.hessian_detector import detect_hessian_ridges
+from core.detection.hsv_detector import detect_hsv_evidence
 from core.models import ImageData, ROI
 
 
@@ -324,6 +324,7 @@ def _calculate_outside_white_support(
 
     return float(support)
 
+
 def _calculate_boundary_contact(
     contour: np.ndarray,
     roi: ROI,
@@ -432,6 +433,7 @@ def _score_width(
 
     return 1.0
 
+
 def _score_boundary_contact(
     boundary_touch_count: int,
 ) -> float:
@@ -456,6 +458,7 @@ def _score_boundary_contact(
         boundary_touch_count,
         0.10,
     )
+
 
 # ----------------------------------------------------------------------
 # Candidate scoring

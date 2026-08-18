@@ -1,8 +1,8 @@
-from core.image_loader import load_image, ImageLoadError
+from core.calibration.image_loader import load_image, ImageLoadError
 
 
 try:
-    data = load_image("test_images/target.jpg")
+    data = load_image("test_images/outdoor target.jpeg")
 
     print(data.image.shape)
 

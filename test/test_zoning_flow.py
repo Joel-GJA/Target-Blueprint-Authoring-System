@@ -12,8 +12,8 @@ import numpy as np
 
 from PySide6.QtWidgets import QApplication
 
-from core.image_loader import load_image
-from core.roi_selector import ROISelector
+from core.calibration.image_loader import load_image
+from core.roi.selector import ROISelector
 from core.ui.zone_editor import ZonePolygonEditor
 
 IMAGE_PATH = "test_images/outdoor target.jpeg"

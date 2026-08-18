@@ -1,6 +1,6 @@
-from core.image_loader import load_image
-from core.apriltag_detector import AprilTagDetector
-from core.scale_calibrator import calibrate_scale
+from core.calibration.image_loader import load_image
+from core.detection.apriltag_detector import AprilTagDetector
+from core.calibration.scale_calibrator import calibrate_scale
 
 
 image_data = load_image(

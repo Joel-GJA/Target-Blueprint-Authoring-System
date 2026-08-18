@@ -2,9 +2,9 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-from core.image_loader import load_image
-from core.apriltag_detector import AprilTagDetector
-from core.paper_detector import detect_paper_boundary
+from core.calibration.image_loader import load_image
+from core.detection.apriltag_detector import AprilTagDetector
+from core.detection.paper_detector import detect_paper_boundary
 
 
 IMAGE_PATH = "test_images/outdoor target.jpeg"

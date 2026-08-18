@@ -12,10 +12,10 @@ import numpy as np
 
 from PySide6.QtWidgets import QApplication
 
-from core.image_loader import load_image
-from core.roi_selector import ROISelector
-from core.hessian_detector import detect_hessian_ridges
-from core.hsv_detector import detect_hsv_evidence
+from core.calibration.image_loader import load_image
+from core.roi.selector import ROISelector
+from core.detection.hessian_detector import detect_hessian_ridges
+from core.detection.hsv_detector import detect_hsv_evidence
 
 # Default image path (can be overridden via command-line arguments)
 IMAGE_PATH = "test_images/outdoor target.jpeg"

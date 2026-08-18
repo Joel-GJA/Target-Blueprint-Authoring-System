@@ -1,5 +1,5 @@
-from core.image_loader import load_image
-from core.apriltag_detector import AprilTagDetector
+from core.calibration.image_loader import load_image
+from core.detection.apriltag_detector import AprilTagDetector
 
 
 image_data = load_image(

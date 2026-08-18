@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 
 from PySide6.QtWidgets import QApplication
 
-from core.image_loader import load_image
-from core.roi_selector import ROISelector
-from core.hsv_detector import detect_hsv_evidence
+from core.calibration.image_loader import load_image
+from core.roi.selector import ROISelector
+from core.detection.hsv_detector import detect_hsv_evidence
 
 
 IMAGE_PATH = "test_images/outdoor target.jpeg"

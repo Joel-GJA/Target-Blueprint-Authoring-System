@@ -185,4 +185,68 @@ class Zone:
     zone_id: str
     polygon: np.ndarray  # OpenCV contour shape (N, 1, 2), ROI-local coordinates
     score: float
-    name: str = ""
+    name: str = ""
+
+
+@dataclass
+class FeatureRegion:
+    """A persistent region in the target reference frame designated for visual feature extraction."""
+    id: str
+    polygon: np.ndarray  # OpenCV contour shape (N, 1, 2), ROI-local coordinates
+    region_type: str = "stable"  # "stable", "zone_corner", "optional"
+    priority: int = 1
+    min_features: int = 5
+    max_features: int = 50
+    metadata: dict = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+
+
+@dataclass
+class FeatureRegionTemplate:
+    """A reusable template defining normalized visual feature regions for a target type."""
+    template_id: str
+    target_type: str
+    version: int
+    regions: list[FeatureRegion]  # Stored in normalized coordinates relative to target reference bounds
+    metadata: dict = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+
+
+@dataclass
+class ZoneFeatureAnchor:
+    """An opportunistic feature anchor centered on a scoring zone vertex."""
+    zone_id: str
+    corner_index: int
+    x: float  # ROI-local x coordinate
+    y: float  # ROI-local y coordinate
+    optional: bool = True
+
+
+@dataclass
+class VisualFeature:
+    """A single visual feature (e.g. ORB keypoint and its metadata)."""
+    x: float
+    y: float
+    size: float
+    angle: float
+    response: float
+    octave: int
+    class_id: int
+    descriptor: np.ndarray  # 1D array of uint8 for ORB (typically 32 bytes)
+    source: str = "landmark_region"  # "landmark_region", "silhouette_boundary", "zone_boundary"
+    region_id: str | None = None  # Association with a FeatureRegion
+    anchor_info: dict | None = None  # e.g., {"zone_id": str, "corner_index": int} if opportunistic
+
+
+@dataclass
+class VisualFeatureSet:
+    """Collection of generated visual features and metadata."""
+    features: tuple[VisualFeature, ...]
+    quality_metrics: dict  # e.g., {"distribution_entropy": float, "mean_response": float, "repeatability": float}
+

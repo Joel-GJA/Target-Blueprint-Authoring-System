@@ -346,7 +346,27 @@ class ROISelector(QDialog):
 
         self.roi: ROI | None = None
 
+        # Physical specs parameters and background detection
+        self.tag_size_mm: float = 24.0
+        self.target_width_mm: float = 210.0
+        self.target_height_mm: float = 297.0
+        self.detected_tags = None
+
+        self._tag_thread_result = None
+        import threading
+        self._tag_thread = threading.Thread(target=self._run_bg_apriltag_detection)
+        self._tag_thread.daemon = True
+        self._tag_thread.start()
+
         self._setup_ui()
+
+    def _run_bg_apriltag_detection(self) -> None:
+        try:
+            from core.detection.apriltag_detector import AprilTagDetector
+            detector = AprilTagDetector(families="tag36h11", nthreads=4)
+            self._tag_thread_result = detector.detect(self.image_data)
+        except Exception as e:
+            print(f"Background AprilTag detection error: {e}")
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Blueprint Author — Select Target ROI")
@@ -429,5 +449,75 @@ class ROISelector(QDialog):
             self.status_label.setText("ROI is too small.")
             return
 
-        self.roi_confirmed.emit(self.roi)
-        self.accept()
+        # 1. Wait for background AprilTag detection thread to complete
+        self.status_label.setText("Waiting for background AprilTag detection...")
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        if self._tag_thread and self._tag_thread.is_alive():
+            self._tag_thread.join(timeout=4.0)
+        QGuiApplication.restoreOverrideCursor()
+
+        # 2. Prompt for target physical specifications
+        specs_dialog = PhysicalSpecsDialog(self)
+        if specs_dialog.exec() == QDialog.DialogCode.Accepted:
+            tag_size, width, height = specs_dialog.get_specs()
+            self.tag_size_mm = tag_size
+            self.target_width_mm = width
+            self.target_height_mm = height
+            self.detected_tags = self._tag_thread_result
+            
+            self.roi_confirmed.emit(self.roi)
+            self.accept()
+        else:
+            self.status_label.setText("Physical specs entry cancelled.")
+
+
+class PhysicalSpecsDialog(QDialog):
+    """
+    Dialog asking for physical dimensions: AprilTag size, target page width, and target page height.
+    """
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Target Physical Specifications")
+        self.resize(350, 180)
+        
+        from PySide6.QtWidgets import QFormLayout, QLineEdit, QDialogButtonBox
+        layout = QFormLayout(self)
+        
+        self.tag_size_edit = QLineEdit(self)
+        self.tag_size_edit.setText("24.0")
+        layout.addRow("AprilTag Size (mm):", self.tag_size_edit)
+        
+        self.width_edit = QLineEdit(self)
+        self.width_edit.setText("210.0")
+        layout.addRow("Target Page Width (mm):", self.width_edit)
+        
+        self.height_edit = QLineEdit(self)
+        self.height_edit.setText("297.0")
+        layout.addRow("Target Page Height (mm):", self.height_edit)
+        
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            Qt.Orientation.Horizontal,
+            self
+        )
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addRow(self.buttons)
+        
+    def get_specs(self) -> tuple[float, float, float]:
+        try:
+            tag_size = float(self.tag_size_edit.text())
+        except ValueError:
+            tag_size = 24.0
+            
+        try:
+            width = float(self.width_edit.text())
+        except ValueError:
+            width = 210.0
+            
+        try:
+            height = float(self.height_edit.text())
+        except ValueError:
+            height = 297.0
+            
+        return tag_size, width, height

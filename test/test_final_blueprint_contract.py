@@ -51,8 +51,16 @@ def verify_blueprint_contract(saved_bp: Blueprint, loaded_bp: Blueprint) -> None
     # 3. Calibration & AprilTag Checks
     print("-" * 50)
     print("[3. CALIBRATION & REGISTRATION REFERENCE CONTRACT]")
-    print(f"  Scale Match      : {saved_bp.pixels_per_mm == loaded_bp.pixels_per_mm:.6f} px/mm")
+    print(f"  Scale Match      : {saved_bp.pixels_per_mm == loaded_bp.pixels_per_mm} px/mm")
+    print(f"  Tag Size Match   : {saved_bp.tag_size_mm == loaded_bp.tag_size_mm} (Tag Size: {loaded_bp.tag_size_mm} mm)")
+    print(f"  Width Match      : {saved_bp.target_width_mm == loaded_bp.target_width_mm} (Width: {loaded_bp.target_width_mm} mm)")
+    print(f"  Height Match     : {saved_bp.target_height_mm == loaded_bp.target_height_mm} (Height: {loaded_bp.target_height_mm} mm)")
     print(f"  AprilTags Count  : {len(saved_bp.april_tags) == len(loaded_bp.april_tags)} (Count: {len(loaded_bp.april_tags)})")
+    
+    assert saved_bp.tag_size_mm == loaded_bp.tag_size_mm, "Tag size contract violation"
+    assert saved_bp.target_width_mm == loaded_bp.target_width_mm, "Target width contract violation"
+    assert saved_bp.target_height_mm == loaded_bp.target_height_mm, "Target height contract violation"
+    
     for st, lt in zip(saved_bp.april_tags, loaded_bp.april_tags):
         print(f"    - Tag #{lt.tag_id}: center={lt.center}, corners match={np.array_equal(st.corners, lt.corners)}")
 
@@ -91,16 +99,6 @@ def main():
     print(f"Loading source target image: {image_path}")
     image_data = load_image(image_path)
     
-    print("Detecting reference AprilTags...")
-    detector = AprilTagDetector(families="tag36h11", nthreads=4)
-    apriltags = detector.detect(image_data)
-    
-    print(f"Detected {apriltags.count} AprilTags.")
-    
-    print("Calibrating target physical scale...")
-    scale_result = calibrate_scale(apriltags, tag_size_mm=50.0)
-    print(f"Scale calibration: {scale_result.pixels_per_mm:.6f} px/mm")
-
     # ---------------------------------------------------------
     # STEP 2: Select ROI
     # ---------------------------------------------------------
@@ -111,7 +109,22 @@ def main():
         print("Cancelled.")
         return
     roi = roi_selector.roi
+    tag_size_mm = roi_selector.tag_size_mm
+    target_width_mm = roi_selector.target_width_mm
+    target_height_mm = roi_selector.target_height_mm
+    apriltags = roi_selector.detected_tags
+    
     print(f"Selected ROI: {roi.x}, {roi.y}, {roi.width}, {roi.height}")
+    print(f"Physical Specs Entered: tag_size={tag_size_mm} mm, target={target_width_mm}x{target_height_mm} mm")
+    
+    print("Calibrating target physical scale...")
+    if apriltags is None or apriltags.count == 0:
+        print("No AprilTags detected in background thread! Calibration may fail.")
+        # Fallback empty tags wrapper so we don't crash
+        apriltags = type("TagsWrapper", (), {"count": 0, "detections": []})()
+        
+    scale_result = calibrate_scale(apriltags, tag_size_mm=tag_size_mm)
+    print(f"Scale calibration: {scale_result.pixels_per_mm:.6f} px/mm")
 
     # ---------------------------------------------------------
     # STEP 3: Auto Silhouette Detection & Candidate Selection
@@ -213,7 +226,9 @@ def main():
         roi_bounds=(roi.x, roi.y, roi.width, roi.height),
         pixels_per_mm=scale_result.pixels_per_mm,
         mm_per_pixel=scale_result.millimeters_per_pixel,
-        tag_size_mm=scale_result.reference_tag_size_mm,
+        tag_size_mm=tag_size_mm,
+        target_width_mm=target_width_mm,
+        target_height_mm=target_height_mm,
         april_tags=ref_tags,
         silhouette=final_contour,
         zones=final_zones,

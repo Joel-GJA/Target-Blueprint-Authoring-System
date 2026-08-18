@@ -3,7 +3,7 @@ from core.detection.apriltag_detector import AprilTagDetector
 
 
 image_data = load_image(
-    "test_images/target.jpg"
+    "test_images/target.jpeg"
 )
 
 detector = AprilTagDetector(

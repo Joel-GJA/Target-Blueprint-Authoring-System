@@ -54,6 +54,8 @@ class RuntimeBlueprint:
     pixels_per_mm: float
     mm_per_pixel: float
     tag_size_mm: float
+    target_width_mm: float
+    target_height_mm: float
     april_tags: list[AprilTagRef]
     silhouette: Optional[np.ndarray]  # ROI-local coordinates
     zones: list[ZoneRef]

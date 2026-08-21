@@ -103,6 +103,8 @@ class BlueprintLoader:
             pixels_per_mm=float(data["scale"]["pixels_per_mm"]),
             mm_per_pixel=float(data["scale"]["mm_per_pixel"]),
             tag_size_mm=float(data["scale"]["tag_size_mm"]),
+            target_width_mm=float(data["scale"].get("target_width_mm", 490.0)),
+            target_height_mm=float(data["scale"].get("target_height_mm", 1220.0)),
             april_tags=april_tags,
             silhouette=silhouette,
             zones=zones,

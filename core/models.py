@@ -280,6 +280,8 @@ class Blueprint:
     pixels_per_mm: float
     mm_per_pixel: float
     tag_size_mm: float
+    target_width_mm: float
+    target_height_mm: float
     
     # Calibration AprilTags detected in the reference image
     april_tags: list[AprilTagReference]
@@ -371,7 +373,9 @@ class Blueprint:
             "scale": {
                 "pixels_per_mm": self.pixels_per_mm,
                 "mm_per_pixel": self.mm_per_pixel,
-                "tag_size_mm": self.tag_size_mm
+                "tag_size_mm": self.tag_size_mm,
+                "target_width_mm": self.target_width_mm,
+                "target_height_mm": self.target_height_mm
             },
             "april_tags": tags_data,
             "silhouette": sil_data,
@@ -473,6 +477,8 @@ class Blueprint:
             pixels_per_mm=data["scale"]["pixels_per_mm"],
             mm_per_pixel=data["scale"]["mm_per_pixel"],
             tag_size_mm=data["scale"]["tag_size_mm"],
+            target_width_mm=data["scale"].get("target_width_mm", 490.0),
+            target_height_mm=data["scale"].get("target_height_mm", 1220.0),
             april_tags=tags,
             silhouette=sil,
             zones=zones,

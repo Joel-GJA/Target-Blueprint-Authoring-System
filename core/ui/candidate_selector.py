@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
     QGraphicsPathItem,
     QGraphicsPolygonItem,
-    QGraphicsRectItem
+    QGraphicsRectItem,
+    QLineEdit
 )
 
 from core.models import ImageData, ROI
@@ -34,6 +35,7 @@ class SilhouetteCandidateSelector(QDialog):
         roi: ROI,
         candidates: list,
         white_contour: np.ndarray | None,
+        pixels_per_mm: float | None = None,
         parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
@@ -41,9 +43,24 @@ class SilhouetteCandidateSelector(QDialog):
         self.roi = roi
         self.candidates = candidates
         self.white_contour = white_contour
+        self.pixels_per_mm = pixels_per_mm
 
         self.selected_contour: np.ndarray | None = None
         self._active_contour_item: QGraphicsPolygonItem | None = None
+        
+        # Physical target dimensions (default to width=490mm, height=1220mm)
+        self.target_width_mm: float = 490.0
+        self.target_height_mm: float = 1220.0
+
+        # Override with derived values from white mask contour if available
+        if white_contour is not None and len(white_contour) > 0 and pixels_per_mm is not None and pixels_per_mm > 0:
+            pts = white_contour.reshape(-1, 2)
+            min_pts = np.min(pts, axis=0)
+            max_pts = np.max(pts, axis=0)
+            w_px = max_pts[0] - min_pts[0]
+            h_px = max_pts[1] - min_pts[1]
+            self.target_width_mm = round(float(w_px / pixels_per_mm), 1)
+            self.target_height_mm = round(float(h_px / pixels_per_mm), 1)
 
         self._setup_ui()
         self._load_candidates()
@@ -78,6 +95,26 @@ class SilhouetteCandidateSelector(QDialog):
         self.details_box = QTextBrowser(self)
         self.details_box.setMaximumHeight(180)
         sidebar_layout.addWidget(self.details_box)
+
+        # Target Physical Dimensions Panel
+        sidebar_layout.addWidget(QLabel("<b>Target Physical Dimensions (mm):</b>"))
+        dims_layout = QHBoxLayout()
+        
+        w_layout = QVBoxLayout()
+        w_layout.addWidget(QLabel("Width:"))
+        self.width_edit = QLineEdit(self)
+        self.width_edit.setText(f"{self.target_width_mm:.1f}")
+        w_layout.addWidget(self.width_edit)
+        dims_layout.addLayout(w_layout)
+        
+        h_layout = QVBoxLayout()
+        h_layout.addWidget(QLabel("Height:"))
+        self.height_edit = QLineEdit(self)
+        self.height_edit.setText(f"{self.target_height_mm:.1f}")
+        h_layout.addWidget(self.height_edit)
+        dims_layout.addLayout(h_layout)
+        
+        sidebar_layout.addLayout(dims_layout)
 
         # Action Buttons
         button_layout = QHBoxLayout()
@@ -226,4 +263,15 @@ class SilhouetteCandidateSelector(QDialog):
         if self.selected_contour is None:
             self.details_box.setHtml("<font color='red'><b>Please select a contour first.</b></font>")
             return
+            
+        try:
+            self.target_width_mm = float(self.width_edit.text())
+        except ValueError:
+            self.target_width_mm = 210.0
+            
+        try:
+            self.target_height_mm = float(self.height_edit.text())
+        except ValueError:
+            self.target_height_mm = 297.0
+            
         self.accept()

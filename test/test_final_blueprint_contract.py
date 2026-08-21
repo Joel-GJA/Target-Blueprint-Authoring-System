@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -110,12 +110,10 @@ def main():
         return
     roi = roi_selector.roi
     tag_size_mm = roi_selector.tag_size_mm
-    target_width_mm = roi_selector.target_width_mm
-    target_height_mm = roi_selector.target_height_mm
     apriltags = roi_selector.detected_tags
     
     print(f"Selected ROI: {roi.x}, {roi.y}, {roi.width}, {roi.height}")
-    print(f"Physical Specs Entered: tag_size={tag_size_mm} mm, target={target_width_mm}x{target_height_mm} mm")
+    print(f"Physical Specs Entered: tag_size={tag_size_mm} mm")
     
     print("Calibrating target physical scale...")
     if apriltags is None or apriltags.count == 0:
@@ -137,12 +135,16 @@ def main():
         image_data=image_data,
         roi=roi,
         candidates=detection_result.candidates,
-        white_contour=detection_result.white_mask_contour
+        white_contour=detection_result.white_mask_contour,
+        pixels_per_mm=scale_result.pixels_per_mm
     )
     if candidate_selector.exec() != SilhouetteCandidateSelector.DialogCode.Accepted:
         print("Cancelled.")
         return
     initial_contour = candidate_selector.selected_contour
+    target_width_mm = candidate_selector.target_width_mm
+    target_height_mm = candidate_selector.target_height_mm
+    print(f"Target physical dimensions entered: {target_width_mm}x{target_height_mm} mm")
 
     # ---------------------------------------------------------
     # STEP 4: Human Silhouette Contour Correction
@@ -222,7 +224,7 @@ def main():
         target_type="outdoor_paper",
         name="Outdoor Target Reference",
         format_version="1.0.0",
-        created_at=datetime.utcnow().isoformat() + "Z",
+        created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         roi_bounds=(roi.x, roi.y, roi.width, roi.height),
         pixels_per_mm=scale_result.pixels_per_mm,
         mm_per_pixel=scale_result.millimeters_per_pixel,

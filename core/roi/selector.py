@@ -348,8 +348,6 @@ class ROISelector(QDialog):
 
         # Physical specs parameters and background detection
         self.tag_size_mm: float = 24.0
-        self.target_width_mm: float = 210.0
-        self.target_height_mm: float = 297.0
         self.detected_tags = None
 
         self._tag_thread_result = None
@@ -457,12 +455,11 @@ class ROISelector(QDialog):
         QGuiApplication.restoreOverrideCursor()
 
         # 2. Prompt for target physical specifications
+        # 2. Prompt for target physical specifications
         specs_dialog = PhysicalSpecsDialog(self)
         if specs_dialog.exec() == QDialog.DialogCode.Accepted:
-            tag_size, width, height = specs_dialog.get_specs()
+            tag_size = specs_dialog.get_specs()
             self.tag_size_mm = tag_size
-            self.target_width_mm = width
-            self.target_height_mm = height
             self.detected_tags = self._tag_thread_result
             
             self.roi_confirmed.emit(self.roi)
@@ -473,12 +470,12 @@ class ROISelector(QDialog):
 
 class PhysicalSpecsDialog(QDialog):
     """
-    Dialog asking for physical dimensions: AprilTag size, target page width, and target page height.
+    Dialog asking for physical dimensions: AprilTag size.
     """
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Target Physical Specifications")
-        self.resize(350, 180)
+        self.setWindowTitle("AprilTag Specification")
+        self.resize(320, 110)
         
         from PySide6.QtWidgets import QFormLayout, QLineEdit, QDialogButtonBox
         layout = QFormLayout(self)
@@ -486,14 +483,6 @@ class PhysicalSpecsDialog(QDialog):
         self.tag_size_edit = QLineEdit(self)
         self.tag_size_edit.setText("24.0")
         layout.addRow("AprilTag Size (mm):", self.tag_size_edit)
-        
-        self.width_edit = QLineEdit(self)
-        self.width_edit.setText("210.0")
-        layout.addRow("Target Page Width (mm):", self.width_edit)
-        
-        self.height_edit = QLineEdit(self)
-        self.height_edit.setText("297.0")
-        layout.addRow("Target Page Height (mm):", self.height_edit)
         
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -504,20 +493,9 @@ class PhysicalSpecsDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addRow(self.buttons)
         
-    def get_specs(self) -> tuple[float, float, float]:
+    def get_specs(self) -> float:
         try:
             tag_size = float(self.tag_size_edit.text())
         except ValueError:
             tag_size = 24.0
-            
-        try:
-            width = float(self.width_edit.text())
-        except ValueError:
-            width = 210.0
-            
-        try:
-            height = float(self.height_edit.text())
-        except ValueError:
-            height = 297.0
-            
-        return tag_size, width, height
+        return tag_size

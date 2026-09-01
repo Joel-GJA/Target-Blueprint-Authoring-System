@@ -359,10 +359,10 @@ class RegistrationDebuggerApp(QMainWindow):
             
             # Warp reference target silhouette for visual confirmation!
             if self.blueprint.silhouette is not None:
-                # Silhouette is stored ROI-local in the blueprint, add ROI offsets first
+                # Silhouette is stored in reference coordinates, offset addition commented out
                 sil_ref = self.blueprint.silhouette.copy().reshape(-1, 2)
-                sil_ref[:, 0] += rx
-                sil_ref[:, 1] += ry
+                # sil_ref[:, 0] += rx
+                # sil_ref[:, 1] += ry
                 
                 sil_ref_f32 = sil_ref.astype(np.float32)
                 sil_warped = cv2.perspectiveTransform(sil_ref_f32.reshape(-1, 1, 2), self.H_coarse).reshape(-1, 2)
@@ -395,8 +395,8 @@ class RegistrationDebuggerApp(QMainWindow):
                 if self.blueprint.silhouette is not None:
                     rx, ry, rw, rh = self.blueprint.roi_bounds
                     sil_ref = self.blueprint.silhouette.copy().reshape(-1, 2)
-                    sil_ref[:, 0] += rx
-                    sil_ref[:, 1] += ry
+                    # sil_ref[:, 0] += rx
+                    # sil_ref[:, 1] += ry
                     sil_poly = np.round(sil_ref).astype(np.int32)
                     cv2.polylines(warped_frame, [sil_poly], isClosed=True, color=(0, 255, 255), thickness=2)
                     

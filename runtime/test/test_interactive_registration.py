@@ -496,6 +496,7 @@ class RegistrationDebuggerApp(QMainWindow):
             h_matrix_str = "\n".join(rows)
 
         html = f"""
+        <div style="color: #000000;">
         <h3>Target Acquisition Registration Report</h3>
         <hr>
         <b>TEST FRAME:</b> {os.path.basename(self.curr_image_path)}<br>
@@ -520,6 +521,7 @@ class RegistrationDebuggerApp(QMainWindow):
         - Design Width: {self.blueprint.target_width_mm} mm<br>
         - Design Height: {self.blueprint.target_height_mm} mm<br>
         - Stored scale: {self.blueprint.pixels_per_mm:.6f} px/mm<br>
+        </div>
         """
         self.details_box.setHtml(html)
 
